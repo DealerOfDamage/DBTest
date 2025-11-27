@@ -9,16 +9,16 @@ Simple command-line utility for executing SQL statements against an SQLite datab
 
 ## Usage
 ```
-python db_client.py --db example.db --execute "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT);"
-python db_client.py --db example.db --execute "INSERT INTO notes (body) VALUES ('hello');"
-python db_client.py --db example.db --execute "SELECT * FROM notes;"
-python db_client.py --db example.db --script schema.sql
-python db_client.py --db example.db
+python3.1 db_client.py --db example.db --execute "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT);"
+python3.1 db_client.py --db example.db --execute "INSERT INTO notes (body) VALUES ('hello');"
+python3.1 db_client.py --db example.db --execute "SELECT * FROM notes;"
+python3.1 db_client.py --db example.db --script schema.sql
+python3.1 db_client.py --db example.db
 ```
 
 Use `:memory:` for an in-memory database that disappears when the program exits:
 ```
-python db_client.py --db :memory: --execute "SELECT 'temp' AS value;"
+python3.1 db_client.py --db :memory: --execute "SELECT 'temp' AS value;"
 ```
 
 ### Graphical interface
@@ -26,7 +26,7 @@ python db_client.py --db :memory: --execute "SELECT 'temp' AS value;"
 Launch the Tkinter-based GUI to run statements and view live logs without using the terminal:
 
 ```
-python db_client.py --gui
+python3.1 db_client.py --gui
 ```
 
 Specify an initial database path (defaults to an in-memory database) or connect to a file using the Browse button inside the GUI.
