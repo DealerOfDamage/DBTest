@@ -3,15 +3,22 @@
 
 This script provides a minimal interactive shell for executing SQL
 statements against an SQLite database. It supports executing a single
-statement, running a script file, or entering an interactive prompt.
+statement, running a script file, entering an interactive prompt, or launching
+an optional graphical user interface.
 """
 from __future__ import annotations
 
 import argparse
+import logging
 import sqlite3
 import sys
+import tkinter as tk
 from pathlib import Path
+from tkinter import filedialog, messagebox, scrolledtext
 from typing import Iterable, List, Sequence
+
+
+logger = logging.getLogger(__name__)
 
 
 def connect_database(db_path: str) -> sqlite3.Connection:
@@ -52,33 +59,41 @@ def _format_cell(value: object) -> str:
     return str(value)
 
 
-def execute_statement(cursor: sqlite3.Cursor, sql: str) -> None:
-    """Execute a single SQL statement and print the result."""
+def execute_statement(cursor: sqlite3.Cursor, sql: str) -> str:
+    """Execute a single SQL statement and return the formatted result."""
     try:
         cursor.execute(sql)
     except sqlite3.DatabaseError as exc:
-        print(f"Error: {exc}")
-        return
+        error = f"Error: {exc}"
+        logger.error(error)
+        return error
 
     if cursor.description:
         columns = [column[0] for column in cursor.description]
         rows = cursor.fetchall()
         output = format_rows(columns, rows)
-        print(output)
-    else:
-        affected = cursor.rowcount
-        print(f"OK ({affected} rows affected)")
+        logger.info("Query returned %s row(s)", len(rows))
+        return output
+
+    affected = cursor.rowcount
+    message = f"OK ({affected} rows affected)"
+    logger.info(message)
+    return message
 
 
-def execute_script(cursor: sqlite3.Cursor, path: Path) -> None:
-    """Run all statements from a file."""
+def execute_script(cursor: sqlite3.Cursor, path: Path) -> str:
+    """Run all statements from a file and return a status message."""
     sql = path.read_text(encoding="utf-8")
     try:
         cursor.executescript(sql)
     except sqlite3.DatabaseError as exc:
-        print(f"Error executing script {path}: {exc}")
-        return
-    print(f"Executed script: {path}")
+        error = f"Error executing script {path}: {exc}"
+        logger.error(error)
+        return error
+
+    message = f"Executed script: {path}"
+    logger.info(message)
+    return message
 
 
 def interactive_shell(cursor: sqlite3.Cursor) -> None:
@@ -100,27 +115,182 @@ def interactive_shell(cursor: sqlite3.Cursor) -> None:
         buffer.append(line)
         if stripped.endswith(";"):
             statement = "\n".join(buffer)
-            execute_statement(cursor, statement)
+            output = execute_statement(cursor, statement)
+            print(output)
             buffer.clear()
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Execute SQL statements against an SQLite database.")
-    parser.add_argument("--db", required=True, help="Path to SQLite database (use :memory: for in-memory)")
+    parser.add_argument(
+        "--db",
+        default=":memory:",
+        help="Path to SQLite database (use :memory: for in-memory)",
+    )
     parser.add_argument("--execute", help="Execute a single SQL statement and exit")
     parser.add_argument("--script", type=Path, help="Execute all statements in a SQL script file")
+    parser.add_argument("--gui", action="store_true", help="Launch the graphical interface")
     return parser.parse_args(argv)
+
+
+class LogDisplayHandler(logging.Handler):
+    """Logging handler that writes log messages to a Tkinter text widget."""
+
+    def __init__(self, widget: scrolledtext.ScrolledText) -> None:
+        super().__init__()
+        self.widget = widget
+        self.widget.configure(state="disabled")
+        self.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        message = self.format(record)
+        self.widget.configure(state="normal")
+        self.widget.insert(tk.END, message + "\n")
+        self.widget.yview(tk.END)
+        self.widget.configure(state="disabled")
+
+
+class DatabaseGUI:
+    """Tkinter-based interface for executing SQL statements with live logs."""
+
+    def __init__(self, root: tk.Tk, initial_db: str) -> None:
+        self.root = root
+        self.connection: sqlite3.Connection | None = None
+        self.cursor: sqlite3.Cursor | None = None
+        self.logger = logging.getLogger("db_client.gui")
+
+        self.root.title("DBTest SQLite Client")
+        self.db_path_var = tk.StringVar(value=initial_db)
+
+        self._build_layout()
+        self._configure_logging()
+        self._connect_to_database()
+
+    def _build_layout(self) -> None:
+        db_frame = tk.Frame(self.root)
+        db_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        tk.Label(db_frame, text="Database path:").pack(side=tk.LEFT)
+        tk.Entry(db_frame, textvariable=self.db_path_var, width=40).pack(side=tk.LEFT, padx=5)
+        tk.Button(db_frame, text="Browse", command=self._choose_db_file).pack(side=tk.LEFT)
+        tk.Button(db_frame, text="Connect", command=self._connect_to_database).pack(side=tk.LEFT, padx=5)
+
+        sql_frame = tk.Frame(self.root)
+        sql_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        tk.Label(sql_frame, text="SQL statement:").pack(anchor=tk.W)
+        self.sql_input = scrolledtext.ScrolledText(sql_frame, height=8)
+        self.sql_input.pack(fill=tk.BOTH, expand=True)
+
+        button_frame = tk.Frame(sql_frame)
+        button_frame.pack(fill=tk.X, pady=5)
+        tk.Button(button_frame, text="Execute", command=self._execute_statement).pack(side=tk.LEFT)
+        tk.Button(button_frame, text="Run Script", command=self._run_script).pack(side=tk.LEFT, padx=5)
+
+        tk.Label(sql_frame, text="Results:").pack(anchor=tk.W)
+        self.results_output = scrolledtext.ScrolledText(sql_frame, height=10, state="disabled")
+        self.results_output.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(sql_frame, text="Live Logs:").pack(anchor=tk.W, pady=(10, 0))
+        self.log_output = scrolledtext.ScrolledText(sql_frame, height=10, state="disabled")
+        self.log_output.pack(fill=tk.BOTH, expand=True)
+
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _configure_logging(self) -> None:
+        handler = LogDisplayHandler(self.log_output)
+        handler.setLevel(logging.INFO)
+        self.logger.setLevel(logging.INFO)
+        self.logger.addHandler(handler)
+
+    def _choose_db_file(self) -> None:
+        selection = filedialog.askopenfilename(
+            title="Select SQLite database",
+            filetypes=[("SQLite DB", "*.db"), ("All files", "*.*")],
+        )
+        if selection:
+            self.db_path_var.set(selection)
+
+    def _connect_to_database(self) -> None:
+        path = self.db_path_var.get().strip() or ":memory:"
+        try:
+            if self.connection:
+                self.connection.close()
+            self.connection = connect_database(path)
+            self.cursor = self.connection.cursor()
+            self.logger.info("Connected to %s", path)
+        except sqlite3.DatabaseError as exc:
+            messagebox.showerror("Connection error", str(exc))
+            self.logger.error("Failed to connect to %s: %s", path, exc)
+
+    def _execute_statement(self) -> None:
+        if not self.cursor:
+            messagebox.showwarning("No connection", "Please connect to a database first.")
+            return
+
+        sql = self.sql_input.get("1.0", tk.END).strip()
+        if not sql:
+            messagebox.showinfo("No SQL", "Enter an SQL statement to execute.")
+            return
+
+        result = execute_statement(self.cursor, sql)
+        self._display_result(result)
+        if self.connection:
+            self.connection.commit()
+        self.logger.info("Executed statement")
+
+    def _run_script(self) -> None:
+        if not self.cursor:
+            messagebox.showwarning("No connection", "Please connect to a database first.")
+            return
+
+        filename = filedialog.askopenfilename(
+            title="Select SQL script",
+            filetypes=[("SQL Files", "*.sql"), ("All files", "*.*")],
+        )
+        if not filename:
+            return
+
+        result = execute_script(self.cursor, Path(filename))
+        self._display_result(result)
+        if self.connection:
+            self.connection.commit()
+
+    def _display_result(self, message: str) -> None:
+        self.results_output.configure(state="normal")
+        self.results_output.delete("1.0", tk.END)
+        self.results_output.insert(tk.END, message)
+        self.results_output.configure(state="disabled")
+
+    def _on_close(self) -> None:
+        if self.connection:
+            self.connection.close()
+        self.root.destroy()
+
+
+def launch_gui(initial_db: str) -> None:
+    root = tk.Tk()
+    DatabaseGUI(root, initial_db)
+    root.mainloop()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+    if args.gui:
+        launch_gui(args.db)
+        return 0
+
     connection = connect_database(args.db)
     cursor = connection.cursor()
 
     if args.script:
-        execute_script(cursor, args.script)
+        output = execute_script(cursor, args.script)
+        print(output)
     if args.execute:
-        execute_statement(cursor, args.execute)
+        output = execute_statement(cursor, args.execute)
+        print(output)
     if not args.execute and not args.script:
         interactive_shell(cursor)
 
