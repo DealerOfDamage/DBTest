@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3.1
 """Simple command-line database client using SQLite.
 
 This script provides a minimal interactive shell for executing SQL
