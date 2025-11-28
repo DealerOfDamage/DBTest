@@ -1,6 +1,6 @@
 # DBTest
 
-Simple command-line utility for executing SQL statements against an SQLite database or a remote PostgreSQL instance. A lightweight Tkinter interface is also available when you want clickable controls and live logs.
+Command-line and Tkinter utility for executing SQL statements against an SQLite database or a remote PostgreSQL instance. A lightweight GUI is available when you prefer clickable controls and live logs.
 
 ## Features
 - Connect to any SQLite database file (or use an in-memory database) or a PostgreSQL connection string such as `postgresql://user:pass@host:5432/dbname`.
@@ -9,22 +9,22 @@ Simple command-line utility for executing SQL statements against an SQLite datab
 
 ## Usage
 ```
-python3.1 db_client.py --db example.db --execute "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT);"
-python3.1 db_client.py --db example.db --execute "INSERT INTO notes (body) VALUES ('hello');"
-python3.1 db_client.py --db example.db --execute "SELECT * FROM notes;"
-python3.1 db_client.py --db example.db --script schema.sql
-python3.1 db_client.py --db example.db
+python3 db_client.py --db example.db --execute "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT);"
+python3 db_client.py --db example.db --execute "INSERT INTO notes (body) VALUES ('hello');"
+python3 db_client.py --db example.db --execute "SELECT * FROM notes;"
+python3 db_client.py --db example.db --script schema.sql
+python3 db_client.py --db example.db
 ```
 
 Use a PostgreSQL URI to connect to a remote database (requires `psycopg2-binary`):
 
 ```
-python3.1 db_client.py --db postgresql://user:pass@db.example.com:5432/mydb --execute "SELECT NOW();"
+python3 db_client.py --db postgresql://user:pass@db.example.com:5432/mydb --execute "SELECT NOW();"
 ```
 
 Use `:memory:` for an in-memory database that disappears when the program exits:
 ```
-python3.1 db_client.py --db :memory: --execute "SELECT 'temp' AS value;"
+python3 db_client.py --db :memory: --execute "SELECT 'temp' AS value;"
 ```
 
 ### Graphical interface
@@ -32,7 +32,7 @@ python3.1 db_client.py --db :memory: --execute "SELECT 'temp' AS value;"
 Launch the Tkinter-based GUI to run statements and view live logs without using the terminal:
 
 ```
-python3.1 db_client.py --gui
+python3 db_client.py --gui
 ```
 
 Specify an initial database path (defaults to an in-memory database) or connect to a file/remote URI using the Browse button inside the GUI.
