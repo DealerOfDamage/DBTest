@@ -18,9 +18,9 @@ import re
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence, Tuple
 
-import psycopg2
-from psycopg2 import sql
-from psycopg2.extras import execute_values
+import psycopg
+from psycopg import sql
+from psycopg.extras import execute_values
 
 
 @dataclass
@@ -63,6 +63,13 @@ TYPE_MAPPING = {
 }
 
 
+def quote_ident(identifier: str) -> str:
+    """Return a minimally safe quoted identifier string for SQL fragments."""
+
+    escaped = identifier.replace('"', '""')
+    return f'"{escaped}"'
+
+
 def read_file(path: str) -> str:
     with open(path, "r", encoding="utf-8") as handle:
         return handle.read()
@@ -103,7 +110,7 @@ def convert_mssql_sql(sql_text: str, target_table: str | None = None) -> TableDe
     converted = re.sub(r"GO\s*$", "", converted, flags=re.IGNORECASE | re.MULTILINE)
 
     identifier_pattern = re.compile(re.escape(match.group(0)), flags=re.IGNORECASE)
-    qualified_name = sql.Identifier(schema).string + "." + sql.Identifier(name).string
+    qualified_name = f"{quote_ident(schema)}.{quote_ident(name)}"
     converted = identifier_pattern.sub(f"CREATE TABLE {qualified_name}", converted, count=1)
 
     columns_block_match = re.search(r"CREATE\s+TABLE[^\(]+\((.*)\)\s*;?", converted, flags=re.IGNORECASE | re.DOTALL)
@@ -143,10 +150,7 @@ def create_table(connection, definition: TableDefinition) -> None:
 
 
 def insert_rows(connection, definition: TableDefinition, rows: Iterable[Tuple]) -> None:
-    table_ident = sql.SQL("{}.{}".format(
-        sql.Identifier(definition.schema).string,
-        sql.Identifier(definition.name).string,
-    ))
+    table_ident = sql.SQL(f"{quote_ident(definition.schema)}.{quote_ident(definition.name)}")
     columns_sql = sql.SQL(', ').join(sql.Identifier(c) for c in definition.columns)
     insert_sql = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(table_ident, columns_sql)
 
@@ -173,7 +177,7 @@ def main() -> None:
         definition.schema = args.schema
 
     print(f"Creating table {definition.schema}.{definition.name}...")
-    conn = psycopg2.connect(args.conn)
+    conn = psycopg.connect(args.conn)
     try:
         create_table(conn, definition)
         print("Table created.")
