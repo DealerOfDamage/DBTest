@@ -1,40 +1,26 @@
 # DBTest
 
-Command-line and Tkinter utility for executing SQL statements against an SQLite database or a remote PostgreSQL instance. A lightweight GUI is available when you prefer clickable controls and live logs.
+This project now provides a single-purpose command-line tool for rebuilding a Postgres table from a SQL Server styled schema file and a CSV dataset. The previous code has been removed and replaced with a streamlined workflow centered on this task.
 
-## Features
-- Connect to any SQLite database file (or use an in-memory database) or a PostgreSQL connection string such as `postgresql://user:pass@host:5432/dbname`.
-- Execute a single statement from the command line, run a SQL script file, or use an interactive shell.
-- Results are displayed in a basic table format; non-query statements report affected rows.
+## What it does
+1. Connects to a Postgres database via a connection string.
+2. Reads a `.sql` file that contains a SQL Server style `CREATE TABLE` statement.
+3. Translates common SQL Server syntax to Postgres and creates the table (dropping any existing table of the same name).
+4. Reads rows from a CSV file and inserts them into the new table in column order from the schema.
+
+## Requirements
+- Python 3.10+
+- A reachable Postgres instance
+- `psycopg2-binary` (install with `pip install psycopg2-binary`)
 
 ## Usage
 ```
-python3 db_client.py --db example.db --execute "CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT);"
-python3 db_client.py --db example.db --execute "INSERT INTO notes (body) VALUES ('hello');"
-python3 db_client.py --db example.db --execute "SELECT * FROM notes;"
-python3 db_client.py --db example.db --script schema.sql
-python3 db_client.py --db example.db
+python3 main.py --conn postgresql://user:pass@host:5432/dbname --sql path/to/schema.sql --csv path/to/data.csv
 ```
 
-Use a PostgreSQL URI to connect to a remote database (requires `psycopg2-binary`):
+Optional flags:
+- `--table` — override the table name found in the SQL file.
+- `--schema` — target a specific schema (defaults to `public`).
 
-```
-python3 db_client.py --db postgresql://user:pass@db.example.com:5432/mydb --execute "SELECT NOW();"
-```
-
-Use `:memory:` for an in-memory database that disappears when the program exits:
-```
-python3 db_client.py --db :memory: --execute "SELECT 'temp' AS value;"
-```
-
-### Graphical interface
-
-Launch the Tkinter-based GUI to run statements and view live logs without using the terminal:
-
-```
-python3 db_client.py --gui
-```
-
-Specify an initial database path (defaults to an in-memory database) or connect to a file/remote URI using the Browse button inside the GUI.
-
-While in the interactive shell, type `exit` or `quit` to close the program. End statements with a semicolon (`;`).
+## Notes on SQL conversion
+The conversion handles common data types (`INT`, `NVARCHAR`, `DATETIME`, `BIT`, etc.), removes SQL Server specific options (`WITH (...)`, `ON [PRIMARY]`, `GO`), and turns `IDENTITY` into a Postgres identity column. It is not a full SQL parser; if your schema uses uncommon features, review the generated table before loading data.
