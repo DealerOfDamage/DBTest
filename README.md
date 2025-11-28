@@ -11,7 +11,7 @@ This project now provides a single-purpose command-line tool for rebuilding a Po
 ## Requirements
 - Python 3.10+
 - A reachable Postgres instance
-- `psycopg2-binary` (install with `pip install psycopg2-binary`)
+- `psycopg[binary]` (install with `pip install "psycopg[binary]"`)
 
 ## Usage
 ```
