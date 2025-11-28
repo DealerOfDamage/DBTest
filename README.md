@@ -1,9 +1,9 @@
 # DBTest
 
-Simple command-line utility for executing SQL statements against an SQLite database. A lightweight Tkinter interface is also available when you want clickable controls and live logs.
+Simple command-line utility for executing SQL statements against an SQLite database or a remote PostgreSQL instance. A lightweight Tkinter interface is also available when you want clickable controls and live logs.
 
 ## Features
-- Connect to any SQLite database file (or use an in-memory database).
+- Connect to any SQLite database file (or use an in-memory database) or a PostgreSQL connection string such as `postgresql://user:pass@host:5432/dbname`.
 - Execute a single statement from the command line, run a SQL script file, or use an interactive shell.
 - Results are displayed in a basic table format; non-query statements report affected rows.
 
@@ -14,6 +14,12 @@ python3.1 db_client.py --db example.db --execute "INSERT INTO notes (body) VALUE
 python3.1 db_client.py --db example.db --execute "SELECT * FROM notes;"
 python3.1 db_client.py --db example.db --script schema.sql
 python3.1 db_client.py --db example.db
+```
+
+Use a PostgreSQL URI to connect to a remote database (requires `psycopg2-binary`):
+
+```
+python3.1 db_client.py --db postgresql://user:pass@db.example.com:5432/mydb --execute "SELECT NOW();"
 ```
 
 Use `:memory:` for an in-memory database that disappears when the program exits:
@@ -29,6 +35,6 @@ Launch the Tkinter-based GUI to run statements and view live logs without using 
 python3.1 db_client.py --gui
 ```
 
-Specify an initial database path (defaults to an in-memory database) or connect to a file using the Browse button inside the GUI.
+Specify an initial database path (defaults to an in-memory database) or connect to a file/remote URI using the Browse button inside the GUI.
 
 While in the interactive shell, type `exit` or `quit` to close the program. End statements with a semicolon (`;`).
