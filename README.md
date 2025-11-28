@@ -11,7 +11,7 @@ This project now provides a single-purpose command-line tool for rebuilding a Po
 ## Requirements
 - Python 3.10+
 - A reachable Postgres instance
-- `psycopg[binary]` (install with `pip install "psycopg[binary]"`)
+- `psycopg-binary` (installed automatically from `requirements.txt`)
 
 ### Installation
 Install the dependencies into your virtual environment:
@@ -20,12 +20,12 @@ Install the dependencies into your virtual environment:
 pip install -r requirements.txt
 ```
 
-On Windows, if you encounter `ImportError: DLL load failed while importing _psycopg`, reinstall the binary wheel explicitly and make sure the Visual C++ runtime is available:
+If you see `ImportError: no pq wrapper available` or similar errors when importing `psycopg`, reinstall the bundled binary wheel to ensure `libpq` is included:
 
 ```
-pip install --force-reinstall psycopg2-binary
+pip install --force-reinstall "psycopg[binary]"
 ```
-You can download the [Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) from Microsoft if it is not already installed.
+On Windows, also make sure the Visual C++ runtime is installed; you can download the [Visual C++ Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe) from Microsoft if it is not already present.
 
 ## Usage
 ```
