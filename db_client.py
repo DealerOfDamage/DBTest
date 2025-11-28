@@ -1,26 +1,16 @@
-#!/usr/bin/env python3.1
-"""Simple command-line database client using SQLite.
-
-This script provides a minimal interactive shell for executing SQL
-statements against an SQLite database. It supports executing a single
-statement, running a script file, entering an interactive prompt, or launching
-an optional graphical user interface.
-"""
+#!/usr/bin/env python3
+"""Command-line and Tkinter database client for SQLite and PostgreSQL."""
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import sqlite3
 import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext
-from typing import Iterable, List, Protocol, Sequence
-
-try:
-    from typing import runtime_checkable
-except ImportError:  # python3.1 fallback
-    runtime_checkable = lambda cls: cls  # type: ignore[misc,assignment]
+from typing import Iterable, List, Protocol, Sequence, runtime_checkable
 
 
 logger = logging.getLogger(__name__)
@@ -127,6 +117,57 @@ def execute_statement(cursor: DBAPICursor, sql: str) -> str:
     return message
 
 
+class DatabaseClient:
+    """Manage database connections and statement execution."""
+
+    def __init__(self, target: str) -> None:
+        self.target = target
+        self.connection: DBAPIConnection | None = None
+        self.cursor: DBAPICursor | None = None
+
+    def connect(self) -> None:
+        self.close()
+        self.connection = connect_database(self.target)
+        self.cursor = self.connection.cursor()
+        logger.info("Connected to %s", self.target)
+
+    def ensure_cursor(self) -> DBAPICursor:
+        if not self.cursor:
+            self.connect()
+        assert self.cursor  # for type checkers
+        return self.cursor
+
+    def run_statement(self, sql: str) -> str:
+        cursor = self.ensure_cursor()
+        result = execute_statement(cursor, sql)
+        self.commit()
+        return result
+
+    def run_script(self, path: Path) -> str:
+        cursor = self.ensure_cursor()
+        result = execute_script(cursor, path)
+        self.commit()
+        return result
+
+    def commit(self) -> None:
+        if self.connection:
+            self.connection.commit()
+
+    def close(self) -> None:
+        with contextlib.suppress(Exception):
+            if self.connection:
+                self.connection.close()
+        self.connection = None
+        self.cursor = None
+
+    def __enter__(self) -> "DatabaseClient":
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:  # type: ignore[override]
+        self.close()
+
+
 def execute_script(cursor: DBAPICursor, path: Path) -> str:
     """Run all statements from a file and return a status message."""
     sql = path.read_text(encoding="utf-8")
@@ -167,8 +208,9 @@ def _split_statements(sql: str) -> List[str]:
     return statements
 
 
-def interactive_shell(cursor: DBAPICursor) -> None:
+def interactive_shell(client: DatabaseClient) -> None:
     """Launch an interactive prompt for entering SQL statements."""
+
     print("Enter SQL statements terminated by a semicolon. Type 'exit' or 'quit' to leave.")
     buffer: List[str] = []
     while True:
@@ -186,7 +228,7 @@ def interactive_shell(cursor: DBAPICursor) -> None:
         buffer.append(line)
         if stripped.endswith(";"):
             statement = "\n".join(buffer)
-            output = execute_statement(cursor, statement)
+            output = client.run_statement(statement)
             print(output)
             buffer.clear()
 
@@ -231,8 +273,7 @@ class DatabaseGUI:
 
     def __init__(self, root: tk.Tk, initial_db: str) -> None:
         self.root = root
-        self.connection: DBAPIConnection | None = None
-        self.cursor: DBAPICursor | None = None
+        self.client = DatabaseClient(initial_db)
         self.logger = logging.getLogger("db_client.gui")
 
         self.root.title("DBTest SQLite Client")
@@ -290,36 +331,28 @@ class DatabaseGUI:
     def _connect_to_database(self) -> None:
         path = self.db_path_var.get().strip() or ":memory:"
         try:
-            if self.connection:
-                self.connection.close()
-            self.connection = connect_database(path)
-            self.cursor = self.connection.cursor()
+            self.client.target = path
+            self.client.connect()
             self.logger.info("Connected to %s", path)
         except Exception as exc:
             messagebox.showerror("Connection error", str(exc))
             self.logger.error("Failed to connect to %s: %s", path, exc)
 
     def _execute_statement(self) -> None:
-        if not self.cursor:
-            messagebox.showwarning("No connection", "Please connect to a database first.")
-            return
-
         sql = self.sql_input.get("1.0", tk.END).strip()
         if not sql:
             messagebox.showinfo("No SQL", "Enter an SQL statement to execute.")
             return
 
-        result = execute_statement(self.cursor, sql)
+        try:
+            result = self.client.run_statement(sql)
+        except Exception as exc:
+            result = f"Error: {exc}"
+            self.logger.error(result)
         self._display_result(result)
-        if self.connection:
-            self.connection.commit()
         self.logger.info("Executed statement")
 
     def _run_script(self) -> None:
-        if not self.cursor:
-            messagebox.showwarning("No connection", "Please connect to a database first.")
-            return
-
         filename = filedialog.askopenfilename(
             title="Select SQL script",
             filetypes=[("SQL Files", "*.sql"), ("All files", "*.*")],
@@ -327,10 +360,12 @@ class DatabaseGUI:
         if not filename:
             return
 
-        result = execute_script(self.cursor, Path(filename))
+        try:
+            result = self.client.run_script(Path(filename))
+        except Exception as exc:
+            result = f"Error: {exc}"
+            self.logger.error(result)
         self._display_result(result)
-        if self.connection:
-            self.connection.commit()
 
     def _display_result(self, message: str) -> None:
         self.results_output.configure(state="normal")
@@ -339,8 +374,7 @@ class DatabaseGUI:
         self.results_output.configure(state="disabled")
 
     def _on_close(self) -> None:
-        if self.connection:
-            self.connection.close()
+        self.client.close()
         self.root.destroy()
 
 
@@ -358,20 +392,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         launch_gui(args.db)
         return 0
 
-    connection = connect_database(args.db)
-    cursor = connection.cursor()
+    with DatabaseClient(args.db) as client:
+        if args.script:
+            output = client.run_script(args.script)
+            print(output)
+        if args.execute:
+            output = client.run_statement(args.execute)
+            print(output)
+        if not args.execute and not args.script:
+            interactive_shell(client)
 
-    if args.script:
-        output = execute_script(cursor, args.script)
-        print(output)
-    if args.execute:
-        output = execute_statement(cursor, args.execute)
-        print(output)
-    if not args.execute and not args.script:
-        interactive_shell(cursor)
-
-    connection.commit()
-    connection.close()
     return 0
 
 
