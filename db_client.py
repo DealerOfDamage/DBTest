@@ -15,21 +15,67 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext
-from typing import Iterable, List, Sequence
+from typing import Iterable, List, Protocol, Sequence
+
+try:
+    from typing import runtime_checkable
+except ImportError:  # python3.1 fallback
+    runtime_checkable = lambda cls: cls  # type: ignore[misc,assignment]
 
 
 logger = logging.getLogger(__name__)
 
 
-def connect_database(db_path: str) -> sqlite3.Connection:
-    """Create and return an SQLite connection.
+@runtime_checkable
+class DBAPICursor(Protocol):
+    """Subset of Python DB-API 2.0 cursor methods used by this client."""
+
+    description: Sequence[Sequence[object]] | None
+    rowcount: int
+
+    def execute(self, sql: str) -> object:
+        ...
+
+    def fetchall(self) -> List[Sequence[object]]:
+        ...
+
+
+@runtime_checkable
+class DBAPIConnection(Protocol):
+    """Minimal DB-API 2.0 connection interface used by the client."""
+
+    def cursor(self) -> DBAPICursor:
+        ...
+
+    def commit(self) -> None:
+        ...
+
+    def close(self) -> None:
+        ...
+
+
+def connect_database(db_path: str) -> DBAPIConnection:
+    """Create and return a database connection.
 
     Parameters
     ----------
     db_path:
-        Path to the SQLite database. Use ``:memory:`` for an in-memory
-        database.
+        Path to the SQLite database or a full connection string to a remote
+        database (currently supports PostgreSQL URIs beginning with
+        ``postgres://`` or ``postgresql://``). Use ``:memory:`` for an in-memory
+        SQLite database.
     """
+
+    if db_path.startswith(("postgres://", "postgresql://")):
+        try:
+            import psycopg2  # type: ignore[import-not-found]
+        except ImportError as exc:  # pragma: no cover - psycopg2 optional
+            raise SystemExit(
+                "psycopg2 is required for PostgreSQL connections. Install with 'pip install psycopg2-binary'."
+            ) from exc
+
+        return psycopg2.connect(db_path)
+
     return sqlite3.connect(db_path)
 
 
@@ -59,11 +105,11 @@ def _format_cell(value: object) -> str:
     return str(value)
 
 
-def execute_statement(cursor: sqlite3.Cursor, sql: str) -> str:
+def execute_statement(cursor: DBAPICursor, sql: str) -> str:
     """Execute a single SQL statement and return the formatted result."""
     try:
         cursor.execute(sql)
-    except sqlite3.DatabaseError as exc:
+    except Exception as exc:
         error = f"Error: {exc}"
         logger.error(error)
         return error
@@ -81,12 +127,16 @@ def execute_statement(cursor: sqlite3.Cursor, sql: str) -> str:
     return message
 
 
-def execute_script(cursor: sqlite3.Cursor, path: Path) -> str:
+def execute_script(cursor: DBAPICursor, path: Path) -> str:
     """Run all statements from a file and return a status message."""
     sql = path.read_text(encoding="utf-8")
     try:
-        cursor.executescript(sql)
-    except sqlite3.DatabaseError as exc:
+        if hasattr(cursor, "executescript"):
+            cursor.executescript(sql)  # type: ignore[call-arg]
+        else:
+            for statement in _split_statements(sql):
+                cursor.execute(statement)
+    except Exception as exc:  # sqlite3.DatabaseError or driver-specific
         error = f"Error executing script {path}: {exc}"
         logger.error(error)
         return error
@@ -96,7 +146,28 @@ def execute_script(cursor: sqlite3.Cursor, path: Path) -> str:
     return message
 
 
-def interactive_shell(cursor: sqlite3.Cursor) -> None:
+def _split_statements(sql: str) -> List[str]:
+    """Very small helper to split script text into executable statements."""
+
+    statements: List[str] = []
+    buffer: List[str] = []
+    for line in sql.splitlines():
+        buffer.append(line)
+        if line.rstrip().endswith(";"):
+            statement = "\n".join(buffer).strip().rstrip(";")
+            if statement:
+                statements.append(statement)
+            buffer.clear()
+
+    if buffer:
+        statement = "\n".join(buffer).strip().rstrip(";")
+        if statement:
+            statements.append(statement)
+
+    return statements
+
+
+def interactive_shell(cursor: DBAPICursor) -> None:
     """Launch an interactive prompt for entering SQL statements."""
     print("Enter SQL statements terminated by a semicolon. Type 'exit' or 'quit' to leave.")
     buffer: List[str] = []
@@ -121,11 +192,16 @@ def interactive_shell(cursor: sqlite3.Cursor) -> None:
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Execute SQL statements against an SQLite database.")
+    parser = argparse.ArgumentParser(
+        description="Execute SQL statements against SQLite or PostgreSQL databases."
+    )
     parser.add_argument(
         "--db",
         default=":memory:",
-        help="Path to SQLite database (use :memory: for in-memory)",
+        help=(
+            "Path to SQLite database or PostgreSQL connection string. "
+            "Use :memory: for an in-memory SQLite database."
+        ),
     )
     parser.add_argument("--execute", help="Execute a single SQL statement and exit")
     parser.add_argument("--script", type=Path, help="Execute all statements in a SQL script file")
@@ -155,8 +231,8 @@ class DatabaseGUI:
 
     def __init__(self, root: tk.Tk, initial_db: str) -> None:
         self.root = root
-        self.connection: sqlite3.Connection | None = None
-        self.cursor: sqlite3.Cursor | None = None
+        self.connection: DBAPIConnection | None = None
+        self.cursor: DBAPICursor | None = None
         self.logger = logging.getLogger("db_client.gui")
 
         self.root.title("DBTest SQLite Client")
@@ -219,7 +295,7 @@ class DatabaseGUI:
             self.connection = connect_database(path)
             self.cursor = self.connection.cursor()
             self.logger.info("Connected to %s", path)
-        except sqlite3.DatabaseError as exc:
+        except Exception as exc:
             messagebox.showerror("Connection error", str(exc))
             self.logger.error("Failed to connect to %s: %s", path, exc)
 
