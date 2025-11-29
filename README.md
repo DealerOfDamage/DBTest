@@ -11,7 +11,7 @@ This project now provides a single-purpose command-line tool for rebuilding a Po
 ## Requirements
 - Python 3.10+
 - A reachable Postgres instance
-- `psycopg-binary` (installed automatically from `requirements.txt`)
+- `psycopg[binary]` (installed automatically from `requirements.txt`)
 
 ### Installation
 Install the dependencies into your virtual environment:
