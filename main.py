@@ -20,7 +20,6 @@ from typing import Iterable, List, Sequence, Tuple
 
 import psycopg
 from psycopg import sql
-from psycopg.extras import execute_values
 
 
 @dataclass
@@ -152,10 +151,13 @@ def create_table(connection, definition: TableDefinition) -> None:
 def insert_rows(connection, definition: TableDefinition, rows: Iterable[Tuple]) -> None:
     table_ident = sql.SQL(f"{quote_ident(definition.schema)}.{quote_ident(definition.name)}")
     columns_sql = sql.SQL(', ').join(sql.Identifier(c) for c in definition.columns)
-    insert_sql = sql.SQL("INSERT INTO {} ({}) VALUES %s").format(table_ident, columns_sql)
+    placeholders = sql.SQL(', ').join(sql.Placeholder() for _ in definition.columns)
+    insert_sql = sql.SQL("INSERT INTO {} ({}) VALUES ({})").format(
+        table_ident, columns_sql, placeholders
+    )
 
     with connection.cursor() as cursor:
-        execute_values(cursor, insert_sql.as_string(connection), rows, page_size=500)
+        cursor.executemany(insert_sql, rows)
     connection.commit()
 
 
